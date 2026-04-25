@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from database import init_db
-from models import create_contact, get_project_by_id, get_projects
+from models import create_contact, create_project, get_project_by_id, get_projects
 from seed import seed_projects_if_empty
 
 
@@ -60,6 +60,16 @@ def demo_projects():
 def api_get_projects():
   return jsonify({"projects": get_projects()}), 200
 
+@app.route("/api/projects", methods=["POST"])
+def api_create_project():
+  payload = request.get_json(silent=True) or {}
+  required = ["title", "description", "problem", "solution", "features", "tech_stack", "image_url", "live_url", "category"]
+  for field in required:
+    if not payload.get(field):
+      return jsonify({"error": f"{field} is required"}), 400
+  
+  project = create_project(payload)
+  return jsonify({"project": project}), 201
 
 @app.route("/api/projects/<int:project_id>", methods=["GET"])
 def api_get_project(project_id):
