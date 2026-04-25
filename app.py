@@ -46,6 +46,16 @@ def send_contact_email(name, email, message):
 def home():
     return {"status": "API is running"}
 
+@app.route("/projects")
+def get_projects():
+    return [
+        {
+            "id": 1,
+            "title": "My Project",
+            "description": "Test project"
+        }
+    ]
+
 @app.route("/api/projects", methods=["GET"])
 def api_get_projects():
   return jsonify({"projects": get_projects()}), 200
