@@ -37,3 +37,25 @@ def create_contact(name, email, message):
       "INSERT INTO contacts (name, email, message) VALUES (?, ?, ?)",
       (name.strip(), email.strip(), message.strip())
     )
+
+def create_project(data):
+  with get_connection() as conn:
+    cursor = conn.execute(
+      """
+      INSERT INTO projects (title, description, problem, solution, features, tech_stack, image_url, live_url, category, featured)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      """,
+      (
+        data["title"],
+        data["description"],
+        data["problem"],
+        data["solution"],
+        json.dumps(data["features"]),
+        json.dumps(data["tech_stack"]),
+        data["image_url"],
+        data["live_url"],
+        data["category"],
+        1 if data.get("featured") else 0
+      )
+    )
+    return get_project_by_id(cursor.lastrowid)
