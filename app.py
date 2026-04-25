@@ -47,7 +47,7 @@ def home():
     return {"status": "API is running"}
 
 @app.route("/projects")
-def get_projects():
+def demo_projects():
     return [
         {
             "id": 1,
