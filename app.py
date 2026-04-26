@@ -3,7 +3,7 @@ import smtplib
 from email.mime.text import MIMEText
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
-from database import init_db
+from database import get_connection, init_db
 from models import create_contact, create_project, get_project_by_id, get_projects
 from seed import seed_projects_if_empty
 
@@ -78,6 +78,21 @@ def api_get_project(project_id):
     return jsonify({"error": "Project not found"}), 404
   return jsonify({"project": project}), 200
 
+@app.route("/api/projects/<int:project_id>", methods=["PUT"])
+def api_update_project(project_id):
+  payload = request.get_json(silent=True) or {}
+  with get_connection() as conn:
+    conn.execute(
+      "UPDATE projects SET image_url = ? WHERE id = ?",
+      (payload["image_url"], project_id)
+    )
+  return jsonify({"message": "Project updated"}), 200
+
+@app.route("/api/projects/<int:project_id>", methods=["DELETE"])
+def api_delete_project(project_id):
+  with get_connection() as conn:
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+  return jsonify({"message": "Project deleted"}), 200
 
 @app.route("/api/contact", methods=["POST"])
 def api_contact():
