@@ -49,3 +49,30 @@ def init_db():
       )
       """
     )
+    conn.execute(
+      """
+      CREATE TABLE IF NOT EXISTS login_otps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        otp_hash TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        request_ip TEXT,
+        user_agent TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+      """
+    )
+    conn.execute(
+      """
+      CREATE TABLE IF NOT EXISTS access_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        session_token_hash TEXT NOT NULL,
+        login_ip TEXT,
+        user_agent TEXT,
+        login_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+      )
+      """
+    )
