@@ -104,6 +104,8 @@ def send_contact_email(name, email, message):
   username = os.getenv("SMTP_USERNAME")
   password = os.getenv("SMTP_PASSWORD")
   recipient = os.getenv("CONTACT_RECIPIENT_EMAIL")
+  timeout = int(os.getenv("SMTP_TIMEOUT", "10"))
+  use_ssl = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
 
   if not all([host, port, username, password, recipient]):
     return False, "SMTP not configured; message stored in database."
@@ -117,8 +119,10 @@ def send_contact_email(name, email, message):
   mail["To"] = recipient
 
   try:
-    with smtplib.SMTP(host, int(port)) as server:
-      server.starttls()
+    smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_class(host, int(port), timeout=timeout) as server:
+      if not use_ssl:
+        server.starttls()
       server.login(username, password)
       server.sendmail(username, [recipient], mail.as_string())
     return True, "Email sent successfully."
@@ -132,6 +136,8 @@ def send_otp_email(email, otp):
   username = os.getenv("SMTP_USERNAME")
   password = os.getenv("SMTP_PASSWORD")
   sender = os.getenv("SMTP_FROM_EMAIL", username)
+  timeout = int(os.getenv("SMTP_TIMEOUT", "10"))
+  use_ssl = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
 
   if not all([host, port, username, password, sender]):
     return False, "SMTP not configured; OTP could not be emailed."
@@ -145,12 +151,17 @@ def send_otp_email(email, otp):
   mail["To"] = email
 
   try:
-    with smtplib.SMTP(host, int(port)) as server:
-      server.starttls()
+    smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_class(host, int(port), timeout=timeout) as server:
+      if not use_ssl:
+        server.starttls()
       server.login(username, password)
       server.sendmail(sender, [email], mail.as_string())
     return True, "OTP sent."
-  except Exception:
+  except Exception as error:
+    app.logger.exception("OTP email failed")
+    if os.getenv("DEBUG_AUTH_ERRORS", "false").lower() == "true":
+      return False, f"OTP email failed: {error.__class__.__name__}: {error}"
     return False, "OTP email failed."
 
 
