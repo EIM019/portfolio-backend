@@ -132,8 +132,8 @@ def send_contact_email(name, email, message):
 
 def send_resend_email(to_email, subject, text_body):
   api_key = os.getenv("RESEND_API_KEY")
-  from_email = os.getenv("RESEND_FROM_EMAIL")
-  if not all([api_key, from_email]):
+  from_email = os.getenv("RESEND_FROM_EMAIL", "Portfolio Access <onboarding@resend.dev>")
+  if not api_key:
     return False, "Resend not configured."
 
   try:
