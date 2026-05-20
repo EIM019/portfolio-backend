@@ -13,7 +13,16 @@ from seed import seed_projects_if_empty
 
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": os.getenv("CORS_ORIGIN", "*")}})
+
+cors_origins = [
+  origin.strip().rstrip("/")
+  for origin in os.getenv("CORS_ORIGIN", "https://portfolio-frontend-ufib.vercel.app").split(",")
+  if origin.strip()
+]
+if "https://portfolio-frontend-ufib.vercel.app" not in cors_origins:
+  cors_origins.append("https://portfolio-frontend-ufib.vercel.app")
+
+CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 init_db()
 seed_projects_if_empty()
 
