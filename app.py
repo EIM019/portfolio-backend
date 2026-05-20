@@ -30,6 +30,23 @@ OTP_TTL_MINUTES = 20
 SESSION_TTL_MINUTES = 20
 
 
+@app.before_request
+def handle_cors_preflight():
+  if request.method == "OPTIONS" and request.path.startswith("/api/"):
+    return "", 204
+
+
+@app.after_request
+def add_cors_headers(response):
+  origin = request.headers.get("Origin", "").rstrip("/")
+  if origin in cors_origins:
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Admin-Token"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+  return response
+
+
 def utc_now():
   return datetime.now(timezone.utc)
 
@@ -400,6 +417,16 @@ def not_found(_):
 @app.errorhandler(500)
 def server_error(_):
   return jsonify({"error": "Internal server error"}), 500
+
+
+@app.errorhandler(Exception)
+def unhandled_error(error):
+  app.logger.exception("Unhandled backend error")
+  response = {"error": "Internal server error"}
+  if os.getenv("DEBUG_AUTH_ERRORS", "false").lower() == "true":
+    response["detail"] = str(error)
+    response["error_type"] = error.__class__.__name__
+  return jsonify(response), 500
 
 
 if __name__ == "__main__":
