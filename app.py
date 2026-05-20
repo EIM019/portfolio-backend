@@ -165,13 +165,17 @@ def send_resend_email(to_email, subject, text_body):
 
 
 def send_otp_email(email, otp):
+  email_provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
   resend_sent, resend_message = send_resend_email(
     email,
     "Your portfolio access code",
     f"Your portfolio access code is {otp}.\n\nThis one-time code expires in exactly 20 minutes. If you did not request it, you can ignore this email."
   )
-  if resend_sent or os.getenv("EMAIL_PROVIDER", "").lower() == "resend":
+  if resend_sent or email_provider == "resend":
     return resend_sent, resend_message
+
+  if email_provider != "smtp":
+    return False, f"Unsupported email provider: {email_provider}"
 
   host = os.getenv("SMTP_HOST")
   port = os.getenv("SMTP_PORT")
@@ -446,6 +450,9 @@ def api_auth_debug():
     "recaptcha_required": os.getenv("RECAPTCHA_REQUIRED", "false"),
     "has_recaptcha_v2_secret": bool(os.getenv("RECAPTCHA_V2_SECRET_KEY")),
     "has_recaptcha_v3_secret": bool(os.getenv("RECAPTCHA_V3_SECRET_KEY")),
+    "email_provider": os.getenv("EMAIL_PROVIDER", "resend"),
+    "has_resend_api_key": bool(os.getenv("RESEND_API_KEY")),
+    "has_resend_from_email": bool(os.getenv("RESEND_FROM_EMAIL")),
     "has_smtp_host": bool(os.getenv("SMTP_HOST")),
     "has_smtp_username": bool(os.getenv("SMTP_USERNAME")),
     "has_smtp_password": bool(os.getenv("SMTP_PASSWORD")),
