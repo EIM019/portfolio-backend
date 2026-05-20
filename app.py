@@ -13,7 +13,7 @@ from models import create_contact, create_project, get_project_by_id, get_projec
 from seed import seed_projects_if_empty
 
 
-load_dotenv()
+load_dotenv(override=True)
 
 app = Flask(__name__)
 
@@ -71,11 +71,13 @@ def client_ip():
 
 
 def verify_recaptcha(token, version):
+  recaptcha_required = os.getenv("RECAPTCHA_REQUIRED", "false").lower() == "true"
+  if not recaptcha_required:
+    return True, "reCAPTCHA disabled."
+
   secret_key = os.getenv(f"RECAPTCHA_{version.upper()}_SECRET_KEY")
   if not secret_key:
-    if os.getenv("RECAPTCHA_REQUIRED", "false").lower() == "true":
-      return False, f"reCAPTCHA {version} is not configured."
-    return True, "reCAPTCHA skipped; secret key not configured."
+    return False, f"reCAPTCHA {version} is not configured."
 
   if not token:
     return False, "reCAPTCHA token is required."
@@ -133,50 +135,7 @@ def send_contact_email(name, email, message):
     return False, f"Email failed: {error}"
 
 
-def send_resend_email(to_email, subject, text_body):
-  api_key = os.getenv("RESEND_API_KEY")
-  from_email = os.getenv("RESEND_FROM_EMAIL", "Portfolio Access <onboarding@resend.dev>")
-  if not api_key:
-    return False, "Resend not configured."
-
-  try:
-    response = requests.post(
-      "https://api.resend.com/emails",
-      headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-      },
-      json={
-        "from": from_email,
-        "to": [to_email],
-        "subject": subject,
-        "text": text_body
-      },
-      timeout=10
-    )
-
-    if response.status_code >= 400:
-      return False, f"Resend failed: {response.status_code} {response.text[:200]}"
-
-    return True, "Email sent with Resend."
-  except Exception as error:
-    app.logger.exception("Resend email failed")
-    return False, f"Resend failed: {error.__class__.__name__}: {error}"
-
-
 def send_otp_email(email, otp):
-  email_provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
-  resend_sent, resend_message = send_resend_email(
-    email,
-    "Your portfolio access code",
-    f"Your portfolio access code is {otp}.\n\nThis one-time code expires in exactly 20 minutes. If you did not request it, you can ignore this email."
-  )
-  if resend_sent or email_provider == "resend":
-    return resend_sent, resend_message
-
-  if email_provider != "smtp":
-    return False, f"Unsupported email provider: {email_provider}"
-
   host = os.getenv("SMTP_HOST")
   port = os.getenv("SMTP_PORT")
   username = os.getenv("SMTP_USERNAME")
@@ -450,9 +409,6 @@ def api_auth_debug():
     "recaptcha_required": os.getenv("RECAPTCHA_REQUIRED", "false"),
     "has_recaptcha_v2_secret": bool(os.getenv("RECAPTCHA_V2_SECRET_KEY")),
     "has_recaptcha_v3_secret": bool(os.getenv("RECAPTCHA_V3_SECRET_KEY")),
-    "email_provider": os.getenv("EMAIL_PROVIDER", "resend"),
-    "has_resend_api_key": bool(os.getenv("RESEND_API_KEY")),
-    "has_resend_from_email": bool(os.getenv("RESEND_FROM_EMAIL")),
     "has_smtp_host": bool(os.getenv("SMTP_HOST")),
     "has_smtp_username": bool(os.getenv("SMTP_USERNAME")),
     "has_smtp_password": bool(os.getenv("SMTP_PASSWORD")),
