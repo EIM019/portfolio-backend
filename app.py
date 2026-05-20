@@ -6,11 +6,14 @@ from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
+from dotenv import load_dotenv
 import requests
 from database import get_connection, init_db
 from models import create_contact, create_project, get_project_by_id, get_projects
 from seed import seed_projects_if_empty
 
+
+load_dotenv()
 
 app = Flask(__name__)
 
