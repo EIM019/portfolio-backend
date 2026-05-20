@@ -210,41 +210,53 @@ def api_contact():
 
 @app.route("/api/auth/request-otp", methods=["POST"])
 def api_request_otp():
-  payload = request.get_json(silent=True) or {}
-  email = payload.get("email", "").strip().lower()
-  recaptcha_token = payload.get("recaptchaToken", "")
+  try:
+    init_db()
+    payload = request.get_json(silent=True) or {}
+    email = payload.get("email", "").strip().lower()
+    recaptcha_token = payload.get("recaptchaToken", "")
 
-  if not email or "@" not in email:
-    return jsonify({"error": "A valid email address is required."}), 400
+    if not email or "@" not in email:
+      return jsonify({"error": "A valid email address is required."}), 400
 
-  verified, recaptcha_message = verify_recaptcha(recaptcha_token, "v3")
-  if not verified:
-    return jsonify({"error": recaptcha_message}), 400
+    verified, recaptcha_message = verify_recaptcha(recaptcha_token, "v3")
+    if not verified:
+      return jsonify({"error": recaptcha_message}), 400
 
-  otp = f"{secrets.randbelow(1000000):06d}"
-  expires_at = utc_now() + timedelta(minutes=OTP_TTL_MINUTES)
+    otp = f"{secrets.randbelow(1000000):06d}"
+    expires_at = utc_now() + timedelta(minutes=OTP_TTL_MINUTES)
 
-  with get_connection() as conn:
-    conn.execute(
-      """
-      INSERT INTO login_otps (email, otp_hash, expires_at, request_ip, user_agent)
-      VALUES (?, ?, ?, ?, ?)
-      """,
-      (email, hash_secret(otp), iso_time(expires_at), client_ip(), request.headers.get("User-Agent", ""))
-    )
+    with get_connection() as conn:
+      conn.execute(
+        """
+        INSERT INTO login_otps (email, otp_hash, expires_at, request_ip, user_agent)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (email, hash_secret(otp), iso_time(expires_at), client_ip(), request.headers.get("User-Agent", ""))
+      )
 
-  sent, message = send_otp_email(email, otp)
-  response = {
-    "message": "If that email can receive access codes, a one-time password has been sent.",
-    "expires_in_minutes": OTP_TTL_MINUTES,
-    "email_sent": sent
-  }
+    sent, message = send_otp_email(email, otp)
+    response = {
+      "message": "If that email can receive access codes, a one-time password has been sent.",
+      "expires_in_minutes": OTP_TTL_MINUTES,
+      "email_sent": sent
+    }
 
-  if not sent and os.getenv("FLASK_ENV") == "development":
-    response["dev_otp"] = otp
-    response["debug_message"] = message
+    if not sent and os.getenv("FLASK_ENV") == "development":
+      response["dev_otp"] = otp
+      response["debug_message"] = message
 
-  return jsonify(response), 200
+    if not sent:
+      app.logger.warning("OTP email was not sent: %s", message)
+
+    return jsonify(response), 200
+  except Exception as error:
+    app.logger.exception("OTP request failed")
+    response = {"error": "Could not request one-time password."}
+    if os.getenv("DEBUG_AUTH_ERRORS", "false").lower() == "true":
+      response["detail"] = str(error)
+      response["error_type"] = error.__class__.__name__
+    return jsonify(response), 500
 
 
 @app.route("/api/auth/verify-otp", methods=["POST"])
