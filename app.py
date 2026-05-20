@@ -356,6 +356,34 @@ def api_access_logs():
   return jsonify({"logs": [dict(row) for row in rows]}), 200
 
 
+@app.route("/api/auth/debug", methods=["GET"])
+def api_auth_debug():
+  admin_token = os.getenv("ADMIN_ACCESS_TOKEN")
+  provided_token = request.headers.get("X-Admin-Token", "")
+  if not admin_token or provided_token != admin_token:
+    return jsonify({"error": "Unauthorized"}), 401
+
+  init_db()
+  with get_connection() as conn:
+    tables = [
+      row["name"]
+      for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").fetchall()
+    ]
+
+  return jsonify({
+    "cors_origins": cors_origins,
+    "debug_auth_errors": os.getenv("DEBUG_AUTH_ERRORS", "false"),
+    "recaptcha_required": os.getenv("RECAPTCHA_REQUIRED", "false"),
+    "has_recaptcha_v2_secret": bool(os.getenv("RECAPTCHA_V2_SECRET_KEY")),
+    "has_recaptcha_v3_secret": bool(os.getenv("RECAPTCHA_V3_SECRET_KEY")),
+    "has_smtp_host": bool(os.getenv("SMTP_HOST")),
+    "has_smtp_username": bool(os.getenv("SMTP_USERNAME")),
+    "has_smtp_password": bool(os.getenv("SMTP_PASSWORD")),
+    "has_smtp_from_email": bool(os.getenv("SMTP_FROM_EMAIL")),
+    "tables": tables
+  }), 200
+
+
 @app.route("/api/download-cv", methods=["GET"])
 def api_download_cv():
   cv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cv", "resume.pdf")
