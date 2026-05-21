@@ -67,7 +67,9 @@ def init_db():
       """
       CREATE TABLE IF NOT EXISTS access_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
         email TEXT NOT NULL,
+        provider TEXT DEFAULT 'otp',
         session_token_hash TEXT NOT NULL,
         login_ip TEXT,
         user_agent TEXT,
@@ -76,3 +78,22 @@ def init_db():
       )
       """
     )
+    conn.execute(
+      """
+      CREATE TABLE IF NOT EXISTS oauth_states (
+        state TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+      )
+      """
+    )
+
+    existing_columns = {
+      row["name"]
+      for row in conn.execute("PRAGMA table_info(access_logs)").fetchall()
+    }
+    if "name" not in existing_columns:
+      conn.execute("ALTER TABLE access_logs ADD COLUMN name TEXT")
+    if "provider" not in existing_columns:
+      conn.execute("ALTER TABLE access_logs ADD COLUMN provider TEXT DEFAULT 'otp'")

@@ -4,7 +4,8 @@ import secrets
 import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
-from flask import Flask, jsonify, request, send_file
+from urllib.parse import urlencode
+from flask import Flask, jsonify, redirect, request, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
@@ -31,6 +32,8 @@ seed_projects_if_empty()
 
 OTP_TTL_MINUTES = 20
 SESSION_TTL_MINUTES = 20
+OAUTH_STATE_TTL_MINUTES = 10
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://portfolio-frontend-ufib.vercel.app").rstrip("/")
 
 
 @app.before_request
@@ -61,6 +64,34 @@ def iso_time(value):
 def hash_secret(value):
   salt = os.getenv("OTP_HASH_SALT", os.getenv("SECRET_KEY", "portfolio-dev-salt"))
   return hashlib.sha256(f"{salt}:{value}".encode("utf-8")).hexdigest()
+
+
+def create_access_session(email, name="", provider="otp"):
+  session_token = secrets.token_urlsafe(32)
+  session_expires_at = utc_now() + timedelta(minutes=SESSION_TTL_MINUTES)
+
+  with get_connection() as conn:
+    conn.execute(
+      """
+      INSERT INTO access_logs (name, email, provider, session_token_hash, login_ip, user_agent, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      """,
+      (
+        name,
+        email,
+        provider,
+        hash_secret(session_token),
+        client_ip(),
+        request.headers.get("User-Agent", ""),
+        iso_time(session_expires_at)
+      )
+    )
+
+  return session_token, session_expires_at
+
+
+def frontend_redirect(params):
+  return redirect(f"{FRONTEND_URL}/?{urlencode(params)}")
 
 
 def client_ip():
@@ -369,23 +400,9 @@ def api_verify_otp():
     if now > expires_at or row["otp_hash"] != hash_secret(otp):
       return jsonify({"error": "Invalid or expired one-time password."}), 401
 
-    session_token = secrets.token_urlsafe(32)
-    session_expires_at = now + timedelta(minutes=SESSION_TTL_MINUTES)
-
     conn.execute("UPDATE login_otps SET used_at = ? WHERE id = ?", (iso_time(now), row["id"]))
-    conn.execute(
-      """
-      INSERT INTO access_logs (email, session_token_hash, login_ip, user_agent, expires_at)
-      VALUES (?, ?, ?, ?, ?)
-      """,
-      (
-        email,
-        hash_secret(session_token),
-        client_ip(),
-        request.headers.get("User-Agent", ""),
-        iso_time(session_expires_at)
-      )
-    )
+
+  session_token, session_expires_at = create_access_session(email, provider="otp")
 
   return jsonify({
     "message": "Access granted.",
@@ -413,6 +430,100 @@ def api_check_session():
   return jsonify({"authenticated": True, "email": row["email"], "expires_at": row["expires_at"]}), 200
 
 
+@app.route("/api/auth/google/start", methods=["GET"])
+def api_google_start():
+  client_id = os.getenv("GOOGLE_CLIENT_ID")
+  redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "https://portfolio-backend-1-33ud.onrender.com/api/auth/google/callback")
+
+  if not client_id:
+    return jsonify({"error": "Google OAuth is not configured."}), 500
+
+  state = secrets.token_urlsafe(32)
+  expires_at = utc_now() + timedelta(minutes=OAUTH_STATE_TTL_MINUTES)
+
+  with get_connection() as conn:
+    conn.execute(
+      "INSERT INTO oauth_states (state, provider, expires_at) VALUES (?, ?, ?)",
+      (state, "google", iso_time(expires_at))
+    )
+
+  params = {
+    "client_id": client_id,
+    "redirect_uri": redirect_uri,
+    "response_type": "code",
+    "scope": "openid email profile",
+    "state": state,
+    "access_type": "online",
+    "prompt": "select_account"
+  }
+  return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}")
+
+
+@app.route("/api/auth/google/callback", methods=["GET"])
+def api_google_callback():
+  code = request.args.get("code", "")
+  state = request.args.get("state", "")
+  client_id = os.getenv("GOOGLE_CLIENT_ID")
+  client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+  redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "https://portfolio-backend-1-33ud.onrender.com/api/auth/google/callback")
+
+  if not all([code, state, client_id, client_secret]):
+    return frontend_redirect({"auth_error": "Google sign-in is not configured correctly."})
+
+  with get_connection() as conn:
+    row = conn.execute(
+      "SELECT * FROM oauth_states WHERE state = ? AND provider = ?",
+      (state, "google")
+    ).fetchone()
+    conn.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+
+  if not row or utc_now() > datetime.fromisoformat(row["expires_at"]):
+    return frontend_redirect({"auth_error": "Google sign-in expired. Please try again."})
+
+  try:
+    token_response = requests.post(
+      "https://oauth2.googleapis.com/token",
+      data={
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code"
+      },
+      timeout=10
+    )
+    token_response.raise_for_status()
+    id_token = token_response.json().get("id_token")
+
+    profile_response = requests.get(
+      "https://oauth2.googleapis.com/tokeninfo",
+      params={"id_token": id_token},
+      timeout=10
+    )
+    profile_response.raise_for_status()
+    profile = profile_response.json()
+  except Exception:
+    app.logger.exception("Google OAuth callback failed")
+    return frontend_redirect({"auth_error": "Google sign-in failed. Please try again."})
+
+  email_verified = str(profile.get("email_verified", "")).lower() == "true"
+  if profile.get("aud") != client_id or not email_verified:
+    return frontend_redirect({"auth_error": "Google account email could not be verified."})
+
+  email = profile.get("email", "").strip().lower()
+  name = profile.get("name", "").strip()
+  if not email:
+    return frontend_redirect({"auth_error": "Google did not return an email address."})
+
+  session_token, session_expires_at = create_access_session(email, name=name, provider="google")
+  return frontend_redirect({
+    "auth_token": session_token,
+    "auth_expires_at": iso_time(session_expires_at),
+    "auth_email": email,
+    "auth_name": name
+  })
+
+
 @app.route("/api/admin/access-logs", methods=["GET"])
 def api_access_logs():
   admin_token = os.getenv("ADMIN_ACCESS_TOKEN")
@@ -423,7 +534,7 @@ def api_access_logs():
   with get_connection() as conn:
     rows = conn.execute(
       """
-      SELECT id, email, login_ip, user_agent, login_at, expires_at
+      SELECT id, name, email, provider, login_ip, user_agent, login_at, expires_at
       FROM access_logs
       ORDER BY login_at DESC
       LIMIT 200
@@ -457,6 +568,10 @@ def api_auth_debug():
     "has_smtp_username": bool(os.getenv("SMTP_USERNAME")),
     "has_smtp_password": bool(os.getenv("SMTP_PASSWORD")),
     "has_smtp_from_email": bool(os.getenv("SMTP_FROM_EMAIL")),
+    "has_google_client_id": bool(os.getenv("GOOGLE_CLIENT_ID")),
+    "has_google_client_secret": bool(os.getenv("GOOGLE_CLIENT_SECRET")),
+    "google_redirect_uri": os.getenv("GOOGLE_REDIRECT_URI", ""),
+    "frontend_url": FRONTEND_URL,
     "tables": tables
   }), 200
 
