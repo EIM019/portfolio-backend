@@ -135,7 +135,48 @@ def send_contact_email(name, email, message):
     return False, f"Email failed: {error}"
 
 
+def send_resend_email(to_email, subject, text_body):
+  api_key = os.getenv("RESEND_API_KEY")
+  from_email = os.getenv("RESEND_FROM_EMAIL", "noreply@resend.dev")
+  if not api_key:
+    return False, "Resend not configured."
+
+  try:
+    response = requests.post(
+      "https://api.resend.com/emails",
+      headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+      },
+      json={
+        "from": from_email,
+        "to": [to_email],
+        "subject": subject,
+        "text": text_body
+      },
+      timeout=10
+    )
+
+    if response.status_code >= 400:
+      return False, f"Resend failed: {response.status_code} {response.text[:200]}"
+
+    return True, "Email sent with Resend."
+  except Exception as error:
+    app.logger.exception("Resend email failed")
+    return False, f"Resend failed: {error.__class__.__name__}: {error}"
+
+
 def send_otp_email(email, otp):
+  email_provider = os.getenv("EMAIL_PROVIDER", "smtp").lower()
+  if os.getenv("RESEND_API_KEY") or email_provider == "resend":
+    resend_sent, resend_message = send_resend_email(
+      email,
+      "Your portfolio access code",
+      f"Your portfolio access code is {otp}.\n\nThis one-time code expires in exactly 20 minutes. If you did not request it, you can ignore this email."
+    )
+    if resend_sent or email_provider == "resend":
+      return resend_sent, resend_message
+
   host = os.getenv("SMTP_HOST")
   port = os.getenv("SMTP_PORT")
   username = os.getenv("SMTP_USERNAME")
